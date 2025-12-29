@@ -2,15 +2,25 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Inject,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScanOcrDto } from './dto/scan-ocr.dto';
 import { QueryOcrDto } from './dto/query-ocr.dto';
 import { Prisma } from '@prisma/client';
+import { ClientProxy } from '@nestjs/microservices';
+import { OcrWorkerService } from './ocr-worker.service';
 
 @Injectable()
 export class OcrsService {
-  constructor(private prisma: PrismaService) { }
+  private readonly logger = new Logger(OcrsService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    @Inject('RABBITMQ_CLIENT') private rabbitClient: ClientProxy,
+    private ocrWorker: OcrWorkerService,
+  ) { }
 
   async scan(
     scanOcrDto: ScanOcrDto,
@@ -24,7 +34,43 @@ export class OcrsService {
       },
     });
 
+    // Emit job to processing queue
+    await this.emitJobToQueue(job.id);
+
     return this.transformJob(job);
+  }
+
+  async emitJobToQueue(jobId: string): Promise<void> {
+    this.logger.log(`Emitting job ${jobId} to processing queue`);
+
+    // Process job asynchronously (don't await to return response quickly)
+    setImmediate(() => {
+      this.ocrWorker.processOcrJob(jobId).catch((error) => {
+        this.logger.error(
+          `Failed to process job ${jobId}: ${error.message}`,
+          error.stack,
+        );
+      });
+    });
+  }
+
+  async updateJobStatus(
+    jobId: string,
+    status: string,
+    resultJson?: any,
+    errorMessage?: string,
+  ): Promise<void> {
+    await this.prisma.ocrJob.update({
+      where: { id: jobId },
+      data: {
+        status,
+        ...(resultJson && { resultJson }),
+        ...(errorMessage && { errorMessage }),
+        ...(status === 'completed' || status === 'failed'
+          ? { completedAt: new Date() }
+          : {}),
+      },
+    });
   }
 
   async findHistory(

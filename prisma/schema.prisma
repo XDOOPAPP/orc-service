@@ -8,13 +8,14 @@ datasource db {
 }
 
 model OcrJob {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @db.Uuid
-  status      String    @default("queued")
-  fileUrl     String
-  resultJson  Json?
-  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
-  completedAt DateTime? @db.Timestamptz(6)
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  status       String    @default("queued") // queued | processing | completed | failed
+  fileUrl      String
+  resultJson   Json?
+  errorMessage String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+  completedAt  DateTime? @db.Timestamptz(6)
 
   @@index([userId, status])
 }
